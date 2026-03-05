@@ -2,6 +2,9 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require("cors")
 const app = express();
+require("node:dns/promises").setServers(["1.1.1.1", "8.8.8.8"]);
+
+
 require('dotenv').config();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -90,7 +93,7 @@ app.put("/update/progress", async (req, res) => {
   }
 
 
-  
+
 
 })
 mongoose.connect(process.env.MONGODB_URI).then(() => {
