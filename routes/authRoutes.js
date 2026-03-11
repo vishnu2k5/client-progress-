@@ -32,14 +32,15 @@ router.post('/auth/register', async (req, res) => {
     }
 
     try {
-        // Check if organization already exists
+        // Check if organization already exists (lowercase email for case-insensitive check)
+        const normalizedEmail = email.toLowerCase();
         const existingOrg = await Organization.findOne({ 
-            $or: [{ email }, { organizationName }] 
+            $or: [{ email: normalizedEmail }, { organizationName }] 
         });
         
         if (existingOrg) {
             return res.status(400).json({ 
-                message: existingOrg.email === email 
+                message: existingOrg.email === normalizedEmail 
                     ? "Email already registered" 
                     : "Organization name already taken"
             });
@@ -86,8 +87,8 @@ router.post('/auth/login', async (req, res) => {
     }
 
     try {
-        // Find organization by email
-        const organization = await Organization.findOne({ email });
+        // Find organization by email (lowercase for case-insensitive lookup)
+        const organization = await Organization.findOne({ email: email.toLowerCase() });
         
         if (!organization) {
             return res.status(401).json({ message: "Invalid email or password" });

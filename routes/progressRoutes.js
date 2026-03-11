@@ -107,9 +107,23 @@ router.put('/update/progress', authMiddleware, async (req, res) => {
             return res.status(404).json({ message: "Client not found" });
         }
 
+        // Whitelist allowed fields - explicitly exclude clientId and other sensitive fields
+        const allowedFields = ['Lead', 'firstContact', 'followUp', 'RFQ', 'quote', 'quoteFollowUp', 'order', 'delivered'];
+        const updateData = {};
+        
+        for (const field of allowedFields) {
+            if (req.body[field] !== undefined) {
+                updateData[field] = req.body[field];
+            }
+        }
+
+        if (Object.keys(updateData).length === 0) {
+            return res.status(400).json({ message: "No valid fields to update" });
+        }
+
         const updated = await Progress.findOneAndUpdate(
             { clientId: new mongoose.Types.ObjectId(clientId) },
-            { $set: req.body },
+            { $set: updateData },
             { new: true }
         );
 
