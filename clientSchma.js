@@ -1,13 +1,23 @@
-const schma = require('mongoose').Schema;
+const mongoose = require('mongoose');
+const schema = mongoose.Schema;
 
-const clientSchma = new schma({
-    clientName:{
-        type:String,
-        required:true,
-        trim:true
+const clientSchema = new schema({
+    organizationId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Organization",
+        required: true
+    },
+    clientName: {
+        type: String,
+        required: true,
+        trim: true
     }
-},{
-    timestamps:true
+}, {
+    timestamps: true
 })
 
-module.exports = require('mongoose').model("Client",clientSchma)
+// Add indexes for faster queries
+clientSchema.index({ organizationId: 1 });
+clientSchema.index({ organizationId: 1, clientName: 1 });
+
+module.exports = mongoose.model("Client", clientSchema);
