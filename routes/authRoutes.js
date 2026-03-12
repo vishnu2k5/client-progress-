@@ -1,8 +1,38 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
 const Organization = require('../organizationSchema');
 const authMiddleware = require('../middleware/authMiddleware');
+const imagekit = require('../config/imagekit');
+
+// Multer setup - store file in memory for ImageKit upload
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only image files are allowed'), false);
+        }
+    }
+});
+
+// Wrapper to catch multer errors (file filter, size limit) gracefully
+const handleUpload = (req, res, next) => {
+    upload.single('logo')(req, res, (err) => {
+        if (err instanceof multer.MulterError) {
+            // Multer-specific error (e.g. file too large)
+            return res.status(400).json({ message: err.code === 'LIMIT_FILE_SIZE' ? 'File too large. Maximum size is 5MB' : err.message });
+        }
+        if (err) {
+            // Other errors (e.g. fileFilter rejection)
+            return res.status(400).json({ message: err.message });
+        }
+        next();
+    });
+};
 
 // Generate JWT Token
 const generateToken = (organizationId) => {
@@ -13,8 +43,8 @@ const generateToken = (organizationId) => {
     );
 };
 
-// POST /auth/register - Register new organization
-router.post('/auth/register', async (req, res) => {
+// POST /auth/register - Register new organization (with optional logo upload)
+router.post('/auth/register', handleUpload, async (req, res) => {
     const { organizationName, email, password, phone, address } = req.body;
 
     // Input validation
@@ -46,13 +76,29 @@ router.post('/auth/register', async (req, res) => {
             });
         }
 
+        // Upload logo to ImageKit if provided
+        let logoUrl = null;
+        if (req.file) {
+            try {
+                const uploadResponse = await imagekit.upload({
+                    file: req.file.buffer.toString('base64'),
+                    fileName: `org-logo-${Date.now()}`,
+                    folder: '/organization-logos'
+                });
+                logoUrl = uploadResponse.url;
+            } catch (uploadErr) {
+                console.error('ImageKit upload failed:', uploadErr.message);
+            }
+        }
+
         // Create new organization
         const newOrganization = new Organization({
             organizationName,
             email,
             password,
             phone,
-            address
+            address,
+            logo: logoUrl
         });
 
         const savedOrganization = await newOrganization.save();
@@ -67,7 +113,8 @@ router.post('/auth/register', async (req, res) => {
                 organizationName: savedOrganization.organizationName,
                 email: savedOrganization.email,
                 phone: savedOrganization.phone,
-                address: savedOrganization.address
+                address: savedOrganization.address,
+                logo: savedOrganization.logo
             },
             token
         });
@@ -115,7 +162,8 @@ router.post('/auth/login', async (req, res) => {
                 organizationName: organization.organizationName,
                 email: organization.email,
                 phone: organization.phone,
-                address: organization.address
+                address: organization.address,
+                logo: organization.logo
             },
             token
         });
@@ -132,14 +180,35 @@ router.get('/auth/me', authMiddleware, async (req, res) => {
     });
 });
 
-// PUT /auth/update - Update current organization profile (protected)
-router.put('/auth/update', authMiddleware, async (req, res) => {
-    const { organizationName, phone, address } = req.body;
+// PUT /auth/update - Update current organization profile (protected, with optional logo upload)
+router.put('/auth/update', authMiddleware, handleUpload, async (req, res) => {
+    const { organizationName, email, phone, address } = req.body;
 
     try {
+        // Only include fields that are actually provided (avoid overwriting with undefined)
+        const updateData = {};
+        if (organizationName !== undefined) updateData.organizationName = organizationName;
+        if (email !== undefined) updateData.email = email;
+        if (phone !== undefined) updateData.phone = phone;
+        if (address !== undefined) updateData.address = address;
+
+        // Upload new logo to ImageKit if provided
+        if (req.file) {
+            try {
+                const uploadResponse = await imagekit.upload({
+                    file: req.file.buffer.toString('base64'),
+                    fileName: `org-logo-${Date.now()}`,
+                    folder: '/organization-logos'
+                });
+                updateData.logo = uploadResponse.url;
+            } catch (uploadErr) {
+                console.error('ImageKit upload failed:', uploadErr.message);
+            }
+        }
+
         const updated = await Organization.findByIdAndUpdate(
             req.organizationId,
-            { $set: { organizationName, phone, address } },
+            { $set: updateData },
             { new: true }
         ).select('-password');
 
