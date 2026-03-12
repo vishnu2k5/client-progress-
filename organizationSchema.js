@@ -29,6 +29,11 @@ const organizationSchema = new schema({
         type: String,
         trim: true
     },
+    logo: {
+        type: String,
+        trim: true,
+        default: null
+    },
     isActive: {
         type: Boolean,
         default: true
