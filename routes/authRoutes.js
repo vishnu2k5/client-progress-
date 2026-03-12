@@ -19,6 +19,21 @@ const upload = multer({
     }
 });
 
+// Wrapper to catch multer errors (file filter, size limit) gracefully
+const handleUpload = (req, res, next) => {
+    upload.single('logo')(req, res, (err) => {
+        if (err instanceof multer.MulterError) {
+            // Multer-specific error (e.g. file too large)
+            return res.status(400).json({ message: err.code === 'LIMIT_FILE_SIZE' ? 'File too large. Maximum size is 5MB' : err.message });
+        }
+        if (err) {
+            // Other errors (e.g. fileFilter rejection)
+            return res.status(400).json({ message: err.message });
+        }
+        next();
+    });
+};
+
 // Generate JWT Token
 const generateToken = (organizationId) => {
     return jwt.sign(
@@ -29,7 +44,7 @@ const generateToken = (organizationId) => {
 };
 
 // POST /auth/register - Register new organization (with optional logo upload)
-router.post('/auth/register', upload.single('logo'), async (req, res) => {
+router.post('/auth/register', handleUpload, async (req, res) => {
     const { organizationName, email, password, phone, address } = req.body;
 
     // Input validation
@@ -166,7 +181,7 @@ router.get('/auth/me', authMiddleware, async (req, res) => {
 });
 
 // PUT /auth/update - Update current organization profile (protected, with optional logo upload)
-router.put('/auth/update', authMiddleware, upload.single('logo'), async (req, res) => {
+router.put('/auth/update', authMiddleware, handleUpload, async (req, res) => {
     const { organizationName, email, phone, address } = req.body;
 
     try {
