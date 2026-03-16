@@ -17,6 +17,9 @@ const organizationRoutes = require('./routes/organizationRoutes');
 const authRoutes = require('./routes/authRoutes');
 
 // Use Routes
+app.get('/', (req, res) => {
+    res.json({ message: "Welcome to the API" });
+});
 app.use(authRoutes);
 app.use(clientRoutes);
 app.use(progressRoutes);
