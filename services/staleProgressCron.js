@@ -7,6 +7,7 @@ const Progress = require('../progressSchma');
 const expo = new Expo();
 const MIN_DAYS_FOR_REMINDER = 2;
 const stages = ['Lead', 'firstContact', 'followUp', 'RFQ', 'quote', 'quoteFollowUp', 'order'];
+const SEND_HOURS = new Set([9, 11, 13, 15, 17]);
 
 function toTs(value) {
     if (!value) return null;
@@ -51,11 +52,12 @@ function getLastUpdateInfo(progressData) {
     };
 }
 
-function dayKeyUTC(date = new Date()) {
-    const y = date.getUTCFullYear();
-    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(date.getUTCDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+function slotKeyLocal(date = new Date()) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    const h = String(date.getHours()).padStart(2, '0');
+    return `${y}-${m}-${d}:${h}`;
 }
 
 async function markInvalidTokensInactiveFromTickets(messages, tickets) {
@@ -68,7 +70,7 @@ async function markInvalidTokensInactiveFromTickets(messages, tickets) {
         }
     }
 
-    const validInvalidTokens = invalidTokens.filter(Boolean);
+    const validInvalidTokens = [...new Set(invalidTokens.filter(Boolean))];
     if (!validInvalidTokens.length) return;
 
     await NotificationDevice.updateMany(
@@ -77,7 +79,11 @@ async function markInvalidTokensInactiveFromTickets(messages, tickets) {
     );
 }
 
-async function sendStaleProgressNotifications() {
+async function sendStaleProgressNotifications(now = new Date()) {
+    if (!SEND_HOURS.has(now.getHours())) {
+        return;
+    }
+
     const progresses = await Progress.find({ delivered: { $ne: true } })
         .populate('clientId', 'clientName organizationId')
         .lean();
@@ -104,9 +110,9 @@ async function sendStaleProgressNotifications() {
         const activeDevices = await NotificationDevice.find({ organizationId: orgId, isActive: true }).lean();
         if (!activeDevices.length) continue;
 
-        const todayKey = dayKeyUTC();
+        const slotKey = slotKeyLocal(now);
         const dedupeKeys = staleClients.map(
-            (client) => `${orgId}:${client.clientId}:stale_progress:${todayKey}`
+            (client) => `${orgId}:${client.clientId}:stale_progress:${slotKey}`
         );
 
         const existingLogs = await NotificationLog.find({ dedupeKey: { $in: dedupeKeys } })
@@ -115,7 +121,7 @@ async function sendStaleProgressNotifications() {
         const existingKeySet = new Set(existingLogs.map((log) => log.dedupeKey));
 
         for (const client of staleClients) {
-            const dedupeKey = `${orgId}:${client.clientId}:stale_progress:${todayKey}`;
+            const dedupeKey = `${orgId}:${client.clientId}:stale_progress:${slotKey}`;
             if (existingKeySet.has(dedupeKey)) continue;
 
             const messages = activeDevices
@@ -156,8 +162,8 @@ async function sendStaleProgressNotifications() {
 }
 
 function startStaleProgressCron() {
-    // Every hour at minute 0.
-    cron.schedule('0 * * * *', async () => {
+    // 5 reminders/day at 09:00, 11:00, 13:00, 15:00, 17:00.
+    cron.schedule('0 9,11,13,15,17 * * *', async () => {
         try {
             await sendStaleProgressNotifications();
             console.log('[stale-progress-cron] run completed');
