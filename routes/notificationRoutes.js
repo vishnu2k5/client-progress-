@@ -11,6 +11,13 @@ router.post('/notifications/register-device', authMiddleware, async (req, res) =
         const organizationId = req.organizationId;
         const { platform, expoPushToken } = req.body;
 
+        console.log('[notifications/register-device] request', {
+            organizationId: organizationId?.toString?.(),
+            platform,
+            hasToken: !!expoPushToken,
+            tokenPreview: expoPushToken ? `${expoPushToken.slice(0, 20)}...` : null
+        });
+
         if (!platform || !expoPushToken) {
             return res.status(400).json({ message: 'platform and expoPushToken are required' });
         }
@@ -35,8 +42,14 @@ router.post('/notifications/register-device', authMiddleware, async (req, res) =
             { upsert: true, new: true, setDefaultsOnInsert: true }
         );
 
+        console.log('[notifications/register-device] success', {
+            organizationId: organizationId?.toString?.(),
+            deviceId: device?._id?.toString?.()
+        });
+
         return res.json({ message: 'Device registered', data: device });
     } catch (error) {
+        console.error('[notifications/register-device] failed', error);
         return res.status(500).json({ message: 'Failed to register device', error: error.message });
     }
 });
