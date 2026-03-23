@@ -15,6 +15,8 @@ const clientRoutes = require('./routes/clientRoutes');
 const progressRoutes = require('./routes/progressRoutes');
 const organizationRoutes = require('./routes/organizationRoutes');
 const authRoutes = require('./routes/authRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
+const { startStaleProgressCron } = require('./services/staleProgressCron');
 
 // Use Routes
 app.get('/', (req, res) => {
@@ -24,6 +26,7 @@ app.use(authRoutes);
 app.use(clientRoutes);
 app.use(progressRoutes);
 app.use(organizationRoutes);
+app.use(notificationRoutes);
 
 // 404 handler
 app.use((req, res) => {
@@ -52,6 +55,7 @@ app.use((err, req, res, next) => {
 
 mongoose.connect(process.env.MONGODB_URI).then(() => {
     console.log("MongoDB Connected")
+    startStaleProgressCron();
     app.listen(3000, () => {
         console.log("Server is running on port 3000")
     })
