@@ -8,6 +8,7 @@ const expo = new Expo();
 const MIN_DAYS_FOR_REMINDER = 2;
 const stages = ['Lead', 'firstContact', 'followUp', 'RFQ', 'quote', 'quoteFollowUp', 'order'];
 const SEND_HOURS = new Set([9, 11, 13, 15, 17]);
+const DEBUG_EVERY_MINUTE = String(process.env.STALE_PROGRESS_DEBUG_EVERY_MINUTE || '').toLowerCase() === 'true';
 
 function toTs(value) {
     if (!value) return null;
@@ -80,7 +81,7 @@ async function markInvalidTokensInactiveFromTickets(messages, tickets) {
 }
 
 async function sendStaleProgressNotifications(now = new Date()) {
-    if (!SEND_HOURS.has(now.getHours())) {
+    if (!DEBUG_EVERY_MINUTE && !SEND_HOURS.has(now.getHours())) {
         return;
     }
 
@@ -162,11 +163,16 @@ async function sendStaleProgressNotifications(now = new Date()) {
 }
 
 function startStaleProgressCron() {
-    // 5 reminders/day at 09:00, 11:00, 13:00, 15:00, 17:00.
-    cron.schedule('0 9,11,13,15,17 * * *', async () => {
+    const schedule = DEBUG_EVERY_MINUTE ? '* * * * *' : '0 9,11,13,15,17 * * *';
+    // Normal mode: 5 reminders/day at 09:00, 11:00, 13:00, 15:00, 17:00.
+    // Debug mode: every minute when STALE_PROGRESS_DEBUG_EVERY_MINUTE=true.
+    cron.schedule(schedule, async () => {
         try {
             await sendStaleProgressNotifications();
-            console.log('[stale-progress-cron] run completed');
+            console.log('[stale-progress-cron] run completed', {
+                mode: DEBUG_EVERY_MINUTE ? 'debug-every-minute' : 'scheduled-hours',
+                schedule
+            });
         } catch (error) {
             console.error('[stale-progress-cron] run failed', error);
         }
