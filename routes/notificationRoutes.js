@@ -6,10 +6,33 @@ const authMiddleware = require('../middleware/authMiddleware');
 const router = express.Router();
 const expo = new Expo();
 
+const normalizePlatform = (platform) => (typeof platform === 'string' ? platform.trim().toLowerCase() : '');
+const normalizeToken = (token) => (typeof token === 'string' ? token.trim() : '');
+
+const markInvalidTokensInactiveFromTickets = async (messages, tickets) => {
+    const invalidTokens = [];
+
+    for (let i = 0; i < tickets.length; i += 1) {
+        const ticket = tickets[i];
+        if (ticket?.status === 'error' && ticket?.details?.error === 'DeviceNotRegistered') {
+            invalidTokens.push(messages[i]?.to);
+        }
+    }
+
+    const uniqueInvalidTokens = [...new Set(invalidTokens.filter(Boolean))];
+    if (!uniqueInvalidTokens.length) return;
+
+    await NotificationDevice.updateMany(
+        { expoPushToken: { $in: uniqueInvalidTokens } },
+        { $set: { isActive: false, lastSeenAt: new Date() } }
+    );
+};
+
 router.post('/notifications/register-device', authMiddleware, async (req, res) => {
     try {
         const organizationId = req.organizationId;
-        const { platform, expoPushToken } = req.body;
+        const platform = normalizePlatform(req.body?.platform);
+        const expoPushToken = normalizeToken(req.body?.expoPushToken);
 
         console.log('[notifications/register-device] request', {
             organizationId: organizationId?.toString?.(),
@@ -33,11 +56,13 @@ router.post('/notifications/register-device', authMiddleware, async (req, res) =
         const device = await NotificationDevice.findOneAndUpdate(
             { organizationId, expoPushToken },
             {
-                organizationId,
-                platform,
-                expoPushToken,
-                isActive: true,
-                lastSeenAt: new Date()
+                $set: {
+                    organizationId,
+                    platform,
+                    expoPushToken,
+                    isActive: true,
+                    lastSeenAt: new Date()
+                }
             },
             { upsert: true, new: true, setDefaultsOnInsert: true }
         );
@@ -57,7 +82,7 @@ router.post('/notifications/register-device', authMiddleware, async (req, res) =
 router.delete('/notifications/register-device', authMiddleware, async (req, res) => {
     try {
         const organizationId = req.organizationId;
-        const { expoPushToken } = req.body;
+        const expoPushToken = normalizeToken(req.body?.expoPushToken);
 
         if (!expoPushToken) {
             return res.status(400).json({ message: 'expoPushToken is required' });
@@ -93,10 +118,18 @@ router.post('/notifications/test', authMiddleware, async (req, res) => {
                 data: { type: 'test' }
             }));
 
-        const chunks = expo.chunkPushNotifications(messages);
-        for (const chunk of chunks) {
-            await expo.sendPushNotificationsAsync(chunk);
+        if (!messages.length) {
+            return res.status(400).json({ message: 'No valid Expo token found for active devices' });
         }
+
+        const chunks = expo.chunkPushNotifications(messages);
+        const tickets = [];
+        for (const chunk of chunks) {
+            const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
+            tickets.push(...ticketChunk);
+        }
+
+        await markInvalidTokensInactiveFromTickets(messages, tickets);
 
         return res.json({ message: 'Test notification sent', count: messages.length });
     } catch (error) {

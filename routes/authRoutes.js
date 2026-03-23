@@ -46,9 +46,11 @@ const generateToken = (organizationId) => {
 // POST /auth/register - Register new organization (with optional logo upload)
 router.post('/auth/register', handleUpload, async (req, res) => {
     const { organizationName, email, password, phone, address } = req.body;
+    const normalizedOrgName = typeof organizationName === 'string' ? organizationName.trim() : '';
+    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
     // Input validation
-    if (!organizationName || !email || !password) {
+    if (!normalizedOrgName || !normalizedEmail || !password) {
         return res.status(400).json({ message: "Organization name, email, and password are required" });
     }
 
@@ -57,15 +59,14 @@ router.post('/auth/register', handleUpload, async (req, res) => {
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!emailRegex.test(normalizedEmail)) {
         return res.status(400).json({ message: "Invalid email format" });
     }
 
     try {
         // Check if organization already exists (lowercase email for case-insensitive check)
-        const normalizedEmail = email.toLowerCase();
         const existingOrg = await Organization.findOne({ 
-            $or: [{ email: normalizedEmail }, { organizationName }] 
+            $or: [{ email: normalizedEmail }, { organizationName: normalizedOrgName }] 
         });
         
         if (existingOrg) {
@@ -79,6 +80,10 @@ router.post('/auth/register', handleUpload, async (req, res) => {
         // Upload logo to ImageKit if provided
         let logoUrl = null;
         if (req.file) {
+            if (!imagekit) {
+                return res.status(503).json({ message: 'Logo upload is unavailable. ImageKit is not configured.' });
+            }
+
             try {
                 const uploadResponse = await imagekit.upload({
                     file: req.file.buffer.toString('base64'),
@@ -93,8 +98,8 @@ router.post('/auth/register', handleUpload, async (req, res) => {
 
         // Create new organization
         const newOrganization = new Organization({
-            organizationName,
-            email,
+            organizationName: normalizedOrgName,
+            email: normalizedEmail,
             password,
             phone,
             address,
@@ -127,15 +132,16 @@ router.post('/auth/register', handleUpload, async (req, res) => {
 // POST /auth/login - Login organization
 router.post('/auth/login', async (req, res) => {
     const { email, password } = req.body;
+    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
     // Input validation
-    if (!email || !password) {
+    if (!normalizedEmail || !password) {
         return res.status(400).json({ message: "Email and password are required" });
     }
 
     try {
         // Find organization by email (lowercase for case-insensitive lookup)
-        const organization = await Organization.findOne({ email: email.toLowerCase() });
+        const organization = await Organization.findOne({ email: normalizedEmail });
         
         if (!organization) {
             return res.status(401).json({ message: "Invalid email or password" });
@@ -187,13 +193,50 @@ router.put('/auth/update', authMiddleware, handleUpload, async (req, res) => {
     try {
         // Only include fields that are actually provided (avoid overwriting with undefined)
         const updateData = {};
-        if (organizationName !== undefined) updateData.organizationName = organizationName;
-        if (email !== undefined) updateData.email = email;
+        if (organizationName !== undefined) {
+            const normalizedOrgName = typeof organizationName === 'string' ? organizationName.trim() : '';
+            if (!normalizedOrgName) {
+                return res.status(400).json({ message: "organizationName cannot be empty" });
+            }
+
+            const existingOrgByName = await Organization.findOne({
+                _id: { $ne: req.organizationId },
+                organizationName: normalizedOrgName
+            }).lean();
+
+            if (existingOrgByName) {
+                return res.status(400).json({ message: "Organization name already taken" });
+            }
+
+            updateData.organizationName = normalizedOrgName;
+        }
+        if (email !== undefined) {
+            const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!normalizedEmail || !emailRegex.test(normalizedEmail)) {
+                return res.status(400).json({ message: "Invalid email format" });
+            }
+
+            const existingOrgByEmail = await Organization.findOne({
+                _id: { $ne: req.organizationId },
+                email: normalizedEmail
+            }).lean();
+
+            if (existingOrgByEmail) {
+                return res.status(400).json({ message: "Email already registered" });
+            }
+
+            updateData.email = normalizedEmail;
+        }
         if (phone !== undefined) updateData.phone = phone;
         if (address !== undefined) updateData.address = address;
 
         // Upload new logo to ImageKit if provided
         if (req.file) {
+            if (!imagekit) {
+                return res.status(503).json({ message: 'Logo upload is unavailable. ImageKit is not configured.' });
+            }
+
             try {
                 const uploadResponse = await imagekit.upload({
                     file: req.file.buffer.toString('base64'),
@@ -206,11 +249,19 @@ router.put('/auth/update', authMiddleware, handleUpload, async (req, res) => {
             }
         }
 
+        if (!Object.keys(updateData).length && !req.file) {
+            return res.status(400).json({ message: "No valid fields to update" });
+        }
+
         const updated = await Organization.findByIdAndUpdate(
             req.organizationId,
             { $set: updateData },
-            { new: true }
+            { new: true, runValidators: true }
         ).select('-password');
+
+        if (!updated) {
+            return res.status(404).json({ message: "Organization not found" });
+        }
 
         res.json({
             message: "Profile updated successfully",
@@ -237,6 +288,9 @@ router.put('/auth/change-password', authMiddleware, async (req, res) => {
 
     try {
         const organization = await Organization.findById(req.organizationId);
+        if (!organization) {
+            return res.status(404).json({ message: "Organization not found" });
+        }
         
         // Verify current password
         const isMatch = await organization.comparePassword(currentPassword);

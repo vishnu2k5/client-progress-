@@ -36,25 +36,33 @@ router.get('/clients/:id', authMiddleware, async (req, res) => {
 // POST /add/clients - Add new client with progress (uses logged-in org)
 router.post('/add/clients', authMiddleware, async (req, res) => {
     const { clientName } = req.body;
+    const normalizedClientName = typeof clientName === 'string' ? clientName.trim() : '';
 
-    if (!clientName || !clientName.trim()) {
+    if (!normalizedClientName) {
         return res.status(400).json({ message: "Client name is required" });
     }
 
     try {
         // create client with logged-in organization's ID
         const newClient = new Client({ 
-            clientName, 
+            clientName: normalizedClientName,
             organizationId: req.organizationId 
         });
         const savedClient = await newClient.save();
 
-        // create progress with only clientId
-        const newProgress = new Progress({
-            clientId: savedClient._id
-        });
+        let newProgress;
+        try {
+            // create progress with only clientId
+            newProgress = new Progress({
+                clientId: savedClient._id
+            });
 
-        await newProgress.save();
+            await newProgress.save();
+        } catch (progressError) {
+            // Keep data consistent if progress creation fails.
+            await Client.findByIdAndDelete(savedClient._id);
+            throw progressError;
+        }
 
         res.status(201).json({
             client: savedClient,
@@ -70,14 +78,15 @@ router.post('/add/clients', authMiddleware, async (req, res) => {
 // PUT /update/client/:id - Update client (only if belongs to org)
 router.put('/update/client/:id', authMiddleware, async (req, res) => {
     try {
-        if (!req.body.clientName) {
+        const normalizedClientName = typeof req.body.clientName === 'string' ? req.body.clientName.trim() : '';
+        if (!normalizedClientName) {
             return res.status(400).json({ message: "Client name is required" });
         }
 
         // Single atomic operation: find by id + org and update
         const updated = await Client.findOneAndUpdate(
             { _id: req.params.id, organizationId: req.organizationId },
-            { $set: { clientName: req.body.clientName } },
+            { $set: { clientName: normalizedClientName } },
             { new: true }
         );
 

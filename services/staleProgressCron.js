@@ -104,10 +104,19 @@ async function sendStaleProgressNotifications() {
         const activeDevices = await NotificationDevice.find({ organizationId: orgId, isActive: true }).lean();
         if (!activeDevices.length) continue;
 
+        const todayKey = dayKeyUTC();
+        const dedupeKeys = staleClients.map(
+            (client) => `${orgId}:${client.clientId}:stale_progress:${todayKey}`
+        );
+
+        const existingLogs = await NotificationLog.find({ dedupeKey: { $in: dedupeKeys } })
+            .select('dedupeKey')
+            .lean();
+        const existingKeySet = new Set(existingLogs.map((log) => log.dedupeKey));
+
         for (const client of staleClients) {
-            const dedupeKey = `${orgId}:${client.clientId}:stale_progress:${dayKeyUTC()}`;
-            const alreadySent = await NotificationLog.findOne({ dedupeKey }).lean();
-            if (alreadySent) continue;
+            const dedupeKey = `${orgId}:${client.clientId}:stale_progress:${todayKey}`;
+            if (existingKeySet.has(dedupeKey)) continue;
 
             const messages = activeDevices
                 .filter((device) => Expo.isExpoPushToken(device.expoPushToken))
@@ -140,6 +149,8 @@ async function sendStaleProgressNotifications() {
                 dedupeKey,
                 sentAt: new Date()
             });
+
+            existingKeySet.add(dedupeKey);
         }
     }
 }

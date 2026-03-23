@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require("cors")
 const app = express();
+const PORT = Number(process.env.PORT) || 3000;
 require("node:dns/promises").setServers(["1.1.1.1", "8.8.8.8"]);
 
 require('dotenv').config();
@@ -56,8 +57,8 @@ app.use((err, req, res, next) => {
 mongoose.connect(process.env.MONGODB_URI).then(() => {
     console.log("MongoDB Connected")
     startStaleProgressCron();
-    app.listen(3000, () => {
-        console.log("Server is running on port 3000")
+    app.listen(PORT, () => {
+        console.log(`Server is running on port ${PORT}`)
     })
 })
 .catch((err) => {

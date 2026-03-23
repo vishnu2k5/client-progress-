@@ -12,6 +12,10 @@ router.get('/progress', authMiddleware, async (req, res) => {
         let progress;
         
         if (clientId) {
+            if (!mongoose.Types.ObjectId.isValid(clientId)) {
+                return res.status(400).json({ message: "Invalid clientId format" });
+            }
+
             // Verify client belongs to this organization
             const client = await Client.findOne({ 
                 _id: clientId, 
@@ -22,7 +26,7 @@ router.get('/progress', authMiddleware, async (req, res) => {
                 return res.status(404).json({ message: "Client not found" });
             }
             
-            progress = await Progress.find({ clientId }).populate({
+            progress = await Progress.find({ clientId: new mongoose.Types.ObjectId(clientId) }).populate({
                 path: 'clientId',
                 select: 'clientName organizationId',
                 populate: {
@@ -96,6 +100,10 @@ router.put('/update/progress', authMiddleware, async (req, res) => {
         return res.status(400).json({ message: "clientId query parameter is required" });
     }
 
+    if (!mongoose.Types.ObjectId.isValid(clientId)) {
+        return res.status(400).json({ message: "Invalid clientId format" });
+    }
+
     try {
         // Verify client belongs to this organization
         const client = await Client.findOne({ 
@@ -122,7 +130,7 @@ router.put('/update/progress', authMiddleware, async (req, res) => {
         }
 
         const updated = await Progress.findOneAndUpdate(
-            { clientId: new mongoose.Types.ObjectId(clientId) },
+            { clientId: clientId },
             { $set: updateData },
             { new: true }
         );
